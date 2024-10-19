@@ -1,55 +1,105 @@
 import pandas as pd
 import numpy as np
 from sklearn.impute import SimpleImputer
-import json
 import requests
+import logging
 
-# Función para limpiar el dataset
-def clean_data(csv_path):
-    df = pd.read_csv(csv_path)
+def cargar_y_limpiar_datos(ruta_csv, umbral_columnas=0.5, metodo_relleno='mean'):
+    # Cargar datos
+    df = pd.read_csv(ruta_csv)
+    logging.info(f"Datos cargados correctamente. Forma inicial: {df.shape}")
 
-    # Mostrar información del dataset antes de la limpieza
-    print("Información del DataFrame antes de la limpieza:")
-    print(df.info())
-    print(df.head())
+    # Mostrar información inicial
+    logging.debug(f"Columnas iniciales: {df.columns.tolist()}")
+    logging.debug(f"Tipos de datos:\n{df.dtypes}")
+    logging.debug(f"Valores nulos por columna:\n{df.isnull().sum()}")
 
-    # Limpiar valores nulos para las columnas numéricas
-    imputer = SimpleImputer(strategy='mean')
+    # Eliminar columnas con más del umbral de valores nulos
+    df = df.loc[:, df.isnull().mean() < umbral_columnas]
+    logging.info(f"Columnas después de eliminar las que tienen más del {umbral_columnas*100}% de valores nulos: {df.columns.tolist()}")
 
-    # Seleccionar solo las columnas numéricas (en tu caso no hay, pero es un ejemplo)
-    if not df.select_dtypes(include=[np.number]).empty:
-        df[df.select_dtypes(include=[np.number]).columns] = imputer.fit_transform(df.select_dtypes(include=[np.number]))
+    # Rellenar valores nulos en columnas numéricas
+    imputer = SimpleImputer(strategy=metodo_relleno)
+    columnas_numericas = df.select_dtypes(include=[np.number]).columns
+    if not columnas_numericas.empty:
+        df[columnas_numericas] = imputer.fit_transform(df[columnas_numericas])
+        logging.info(f"Valores nulos en columnas numéricas rellenados usando el método '{metodo_relleno}'.")
     else:
-        print("No se encontraron columnas numéricas en el dataset.")
+        logging.info("No se encontraron columnas numéricas para rellenar.")
 
-    # Devolver el DataFrame limpio
+    # Eliminar filas con valores nulos restantes
+    df.dropna(inplace=True)
+    logging.info(f"Forma después de eliminar filas con valores nulos: {df.shape}")
+
+    # Eliminar filas duplicadas
+    df.drop_duplicates(inplace=True)
+    logging.info(f"Forma después de eliminar filas duplicadas: {df.shape}")
+
+    # Normalizar nombres de columnas
+    df.columns = [col.strip().lower().replace(' ', '_') for col in df.columns]
+    logging.info(f"Nombres de columnas normalizados: {df.columns.tolist()}")
+
+    # Renombrar columnas para que coincidan con los nombres esperados por el backend
+    df.rename(columns={
+        'name': 'name',
+        'category': 'category',
+        'dosage_form': 'dosageForm',
+        'strength': 'strength',
+        'manufacturer': 'manufacturer',
+        'indication': 'indication',
+        'classification': 'classification'
+    }, inplace=True)
+
     return df
 
-# Convertir el dataset limpio a JSON y enviar al backend
-def send_to_backend(df, backend_url):
-    # Convertir el DataFrame a JSON
-    data_json = df.to_json(orient='records')
+def enviar_datos_api(df, url_api, tipo, tamano_lote=100):
+    total_registros = len(df)
+    headers = {'Content-Type': 'application/json'}
+    logging.info(f"Enviando un total de {total_registros} registros a la API.")
 
-    # Mostrar los primeros registros del JSON convertido
-    print("Datos en formato JSON:")
-    print(data_json[:500])  # Mostramos una parte del JSON (puede ser muy grande)
-
-    # Hacer una petición POST al backend
-    response = requests.post(backend_url, json=json.loads(data_json))
-
-    # Verificar si la petición fue exitosa
-    if response.status_code == 201:
-        print(f"Datos enviados correctamente al backend: {backend_url}")
-    else:
-        print(f"Error al enviar datos al backend. Código de estado: {response.status_code}")
+    for inicio in range(0, total_registros, tamano_lote):
+        fin = min(inicio + tamano_lote, total_registros)
+        lote = df.iloc[inicio:fin].to_dict(orient='records')
+        try:
+            # Construir la URL correcta sin duplicar '/batch'
+            url_con_tipo = f"{url_api}/batch/{tipo}"
+            # Enviar el lote al endpoint correcto
+            respuesta = requests.post(url_con_tipo, json=lote, headers=headers)
+            if respuesta.status_code in (200, 201):
+                logging.info(f"Lote {inicio + 1}-{fin} enviado correctamente.")
+            else:
+                logging.error(f"Error al enviar lote {inicio + 1}-{fin}: {respuesta.status_code} - {respuesta.text}")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Excepción al enviar lote {inicio + 1}-{fin}: {e}")
 
 if __name__ == "__main__":
-    # Ruta del CSV original y la URL del backend
-    csv_path = "C:/Users/cuell/OneDrive/Documentos/GitHub/PythonScript/medicine_dataset.csv"
-    backend_url = 'http://localhost:8080/api/datos-bioquimicos'
+    # Configuración del registro de logs
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # Limpiar el dataset
-    df_cleaned = clean_data(csv_path)
+    try:
+        # Definir las rutas y parámetros directamente en el script
+        ruta_csv = "C:/Users/cuell/OneDrive/Documentos/GitHub/PythonScript/medicine_dataset.csv"  # <-- Modifica esta ruta con la ubicación de tu archivo CSV
+        url_api = "http://localhost:8080/api/muestras"  # <-- Modifica esta URL con la de tu backend
+        tipo = "bioquimico"
+        umbral_columnas = 0.5
+        metodo_relleno = 'mean'  # Opciones: 'mean', 'median', 'most_frequent'
+        tamano_lote = 100
+        ruta_salida = "C:/Users/cuell/OneDrive/Documentos/GitHub/PythonScript/datasetLimpio.csv"  # <-- Opcional: especifica una ruta si deseas guardar el CSV limpio
 
-    # Enviar el dataset limpio al backend en formato JSON
-    send_to_backend(df_cleaned, backend_url)
+        # Cargar y limpiar datos
+        df_limpio = cargar_y_limpiar_datos(
+            ruta_csv=ruta_csv,
+            umbral_columnas=umbral_columnas,
+            metodo_relleno=metodo_relleno
+        )
+
+        # Guardar CSV limpio si se proporciona una ruta de salida
+        if ruta_salida:
+            df_limpio.to_csv(ruta_salida, index=False)
+            logging.info(f"Datos limpios guardados en {ruta_salida}")
+
+        # Enviar datos a la API REST
+        enviar_datos_api(df_limpio, url_api, tipo, tamano_lote=tamano_lote)
+
+    except Exception as e:
+        logging.error(f"Se produjo un error: {e}")

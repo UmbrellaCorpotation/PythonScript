@@ -1,4 +1,4 @@
-Name,Category,Dosage Form,Strength,Manufacturer,Indication,Classification
+name,category,dosageForm,strength,manufacturer,indication,classification
 Acetocillin,Antidiabetic,Cream,938 mg,Roche Holding AG,Virus,Over-the-Counter
 Ibuprocillin,Antiviral,Injection,337 mg,CSL Limited,Infection,Over-the-Counter
 Dextrophen,Antibiotic,Ointment,333 mg,Johnson & Johnson,Wound,Prescription
