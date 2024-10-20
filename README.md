@@ -1,3 +1,4 @@
+https://github.com/UmbrellaCorpotation/PythonScript
 # Script de Carga, Limpieza y Envío de Datos
 
 Este script de Python tiene como objetivo cargar un conjunto de datos desde un archivo CSV, limpiarlo y enviarlo en lotes a un backend a través de una API REST. Está diseñado para ser flexible, permitiendo configurar ciertos parámetros, como la estrategia de imputación para los valores nulos y el tamaño del lote para el envío de los datos.
